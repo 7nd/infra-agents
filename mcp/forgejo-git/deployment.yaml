@@ -1,6 +1,11 @@
 # ronmi/forgejo-mcp (community, активно используется — проверено по свежим
 # pull'ам на Docker Hub), встроенный HTTP-режим (не нужен отдельный
 # supergateway-обёртка, в отличие от GlitchTip MCP).
+#
+# --server указывает на internal Service (forgejo-http:3000), а не на
+# внешний https://forgejo.agents.${base_domain}: внутрикластерный трафик не
+# должен зависеть ни от внешнего DNS/Cloudflare, ни от TLS вообще — это
+# service-to-service вызов внутри namespace.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -26,7 +31,7 @@ spec:
             - "--address"
             - ":8080"
             - "--server"
-            - "https://forgejo.agents.${base_domain}"
+            - "http://forgejo-http.agents.svc.cluster.local:3000"
           env:
             - name: FORGEJOMCP_TOKEN
               valueFrom:

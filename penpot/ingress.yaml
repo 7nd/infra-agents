@@ -5,6 +5,16 @@ metadata:
   namespace: agents
   annotations:
     nginx.ingress.kubernetes.io/proxy-body-size: "0"
+    # Cloudflare Free Universal SSL покрывает только ${base_domain} и
+    # *.${base_domain} (один уровень wildcard) — НЕ *.agents.${base_domain}
+    # (второй уровень). Через Cloudflare-прокси клиент получает handshake
+    # failure ещё на этапе TLS до origin (проверено и через прямой openssl
+    # s_client на IP ingress-nginx с нужным SNI — там сертификат
+    # *.agents.${base_domain} отдаётся корректно, и с внешнего клиента
+    # напрямую на прокси-IP — падает именно на Cloudflare). Отключаем прокси
+    # именно для этих записей — резолвятся напрямую на origin, TLS
+    # терминируется на ingress-nginx тем же Let's Encrypt сертификатом.
+    external-dns.alpha.kubernetes.io/cloudflare-proxied: "false"
 spec:
   ingressClassName: ${ingress_class}
   tls:

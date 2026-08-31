@@ -47,6 +47,10 @@ spec:
     ingress:
       enabled: true
       className: ${ingress_class}
+      annotations:
+        # Cloudflare Free Universal SSL не покрывает *.agents.${base_domain}
+        # (второй уровень wildcard) — см. penpot/ingress.yaml, тот же фикс.
+        external-dns.alpha.kubernetes.io/cloudflare-proxied: "false"
       hosts:
         - host: n8n.agents.${base_domain}
           paths:

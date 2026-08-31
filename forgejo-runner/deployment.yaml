@@ -51,8 +51,13 @@ spec:
                 --name agents-runner \
                 --labels "docker:docker://node:22-bookworm,ubuntu-latest:docker://node:22-bookworm"
           env:
+            # Internal Service (forgejo-http:3000), не внешний
+            # https://forgejo.agents.${base_domain}: раннер живёт в том же
+            # namespace, внешний DNS/Cloudflare/TLS для этого вызова не нужны
+            # (и Cloudflare Free Universal SSL их всё равно не покрывает —
+            # см. penpot/ingress.yaml).
             - name: INSTANCE
-              value: https://forgejo.agents.${base_domain}
+              value: http://forgejo-http.agents.svc.cluster.local:3000
             - name: TOKEN
               valueFrom:
                 secretKeyRef:
