@@ -9,8 +9,14 @@ metadata:
 spec:
   interval: 1h
   url: oci://8gears.container-registry.com/library/n8n
+  # Пин на точный тег, а не semver-диапазон: у semver-разрешения на этом
+  # конкретном registry source-controller (v1.4.1) зависал в вечном
+  # "building artifact" без ошибки и без логов — воспроизведено вживую при
+  # первом деплое (forgejo/17.x, тот же source-controller, тот же паттерн —
+  # отработал нормально, так что дело не в самом semver-механизме в целом).
+  # Обновление версии — правка тега здесь, коммит.
   ref:
-    semver: "2.x"
+    tag: "2.1.1"
 ---
 # appVersion дефолтного чарта тянет non-LTS ветку Forgejo (16.x) — сам образ
 # пинуется явно на LTS в forgejo/release.yaml (values.image.tag), чарт здесь
