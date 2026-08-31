@@ -1,0 +1,91 @@
+# SBOM рекомендует LTS-ветку (11 LTS), а не non-LTS 16.0 — appVersion самого
+# чарта тянет non-LTS, поэтому образ пинуется явно через image.tag: "11"
+# (chart сам добавляет суффикс -rootless по image.rootless: true, см.
+# templates/_helpers.tpl чарта — плавающий тег 11-rootless тянет последний
+# патч LTS-ветки).
+#
+# У чарта НЕТ встроенного Postgres/Redis-сабчарта (в отличие от классического
+# gitea/gitea-chart) — только свободная секция gitea.config.database, всегда
+# ожидает внешнюю БД. Общий Postgres этого стенда (см. ../postgres), БД
+# forgejo, тот же admin-юзер, что у n8n/glitchtip — отдельных ролей на
+# read/write для приложений в этой задаче не требуется (только для
+# read-only MCP, см. ../postgres/init-configmap.yaml).
+#
+# gitea.admin.* заводит первого администратора декларативно (passwordMode:
+# keepUpdated — Forgejo будет поддерживать этот пароль синхронизированным с
+# values при каждом апгрейде). API-токен для бота (используется MCP-сервером
+# Forgejo/Git и, при необходимости, n8n) так завести нельзя — Forgejo сам
+# генерирует значение токена только через живой API/CLI, это ручной bootstrap-
+# шаг после первого поднятия (см. README).
+#
+# strategy.type у чарта по умолчанию уже Recreate — совпадает с тем, что нужно
+# на единственной ноде node-group=agents с RWO PVC (не переопределяю).
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: forgejo
+  namespace: agents
+spec:
+  interval: 30m
+  chartRef:
+    kind: OCIRepository
+    name: forgejo
+    namespace: flux-system
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      retries: 3
+  values:
+    image:
+      tag: "11"
+      rootless: true
+    nodeSelector:
+      node-group: agents
+    persistence:
+      enabled: true
+      size: 10Gi
+    service:
+      http:
+        type: ClusterIP
+        port: 3000
+    ingress:
+      enabled: true
+      className: ${ingress_class}
+      annotations:
+        nginx.ingress.kubernetes.io/proxy-body-size: "0"
+      hosts:
+        - host: forgejo.agents.${base_domain}
+          paths:
+            - path: /
+              pathType: Prefix
+              port: http
+      tls:
+        - secretName: wildcard-agents-tls
+          hosts:
+            - forgejo.agents.${base_domain}
+    gitea:
+      admin:
+        username: ${forgejo_admin_username}
+        password: ${forgejo_admin_password}
+        email: ${admin_email}
+        passwordMode: keepUpdated
+      config:
+        server:
+          ROOT_URL: https://forgejo.agents.${base_domain}
+          SSH_LISTEN_PORT: 2222
+        database:
+          DB_TYPE: postgres
+          HOST: postgres.agents.svc.cluster.local:5432
+          NAME: forgejo
+          USER: postgres
+          PASSWD: ${postgres_admin_password}
+        actions:
+          ENABLED: true
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        memory: 1Gi

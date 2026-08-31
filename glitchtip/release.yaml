@@ -1,0 +1,64 @@
+# Официальный чарт проекта (см. sources/helmrepositories.yaml). У чарта нет
+# встроенного Postgres (postgresql.enabled=false по умолчанию, требует
+# CloudNativePG-оператора, если включить — не нужен, общий Postgres этого
+# стенда уже есть) — и свой bundled valkey (valkey.enabled) тут тоже
+# выключается в пользу общего Valkey. replicaCount у чарта дефолтится в 2 с
+# podAntiAffinity — на единственной ноде node-group=agents смысла нет,
+# снижаю до 1.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: glitchtip
+  namespace: agents
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: glitchtip
+      version: "9.x"
+      sourceRef:
+        kind: HelmRepository
+        name: glitchtip
+        namespace: flux-system
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      retries: 3
+  values:
+    replicaCount: 1
+    nodeSelector:
+      node-group: agents
+    glitchtip:
+      domain: https://glitchtip.agents.${base_domain}
+      existingSecret: glitchtip-credentials
+      existingSecretKey: SECRET_KEY
+      database:
+        existingSecret: glitchtip-credentials
+        existingSecretKey: DATABASE_URL
+      valkey:
+        existingSecret: glitchtip-credentials
+        existingSecretKey: REDIS_URL
+    valkey:
+      enabled: false
+    postgresql:
+      enabled: false
+    ingress:
+      enabled: true
+      className: ${ingress_class}
+      hosts:
+        - host: glitchtip.agents.${base_domain}
+          paths:
+            - path: /
+              pathType: Prefix
+      tls:
+        - secretName: wildcard-agents-tls
+          hosts:
+            - glitchtip.agents.${base_domain}
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        memory: 512Mi

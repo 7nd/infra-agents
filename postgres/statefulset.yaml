@@ -1,0 +1,94 @@
+# Официальный образ postgres:17.11 (точное совпадение с версией из SBOM), не
+# чарт: классический Bitnami postgresql-репозиторий сейчас фактически мёртв
+# (charts.bitnami.com/bitnami/index.yaml пуст после смены лицензионной
+# политики Broadcom в 2025), а CloudNativePG-оператор — overkill для задачи
+# "пережить рестарт пода" без бэкапов/HA (см. DoD п.8 и решение пользователя
+# не заводить формальные бэкапы сейчас).
+#
+# StatefulSet, не Deployment: для single-replica с RWO PVC у StatefulSet нет
+# проблемы двойного маунта при обновлении (тот же под с тем же именем
+# пересоздаётся по очереди), в отличие от Deployment+RollingUpdate — не нужен
+# отдельный updateStrategy: Recreate, как у registry/ingress-nginx.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  namespace: agents
+spec:
+  serviceName: postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: postgres
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: postgres
+    spec:
+      nodeSelector:
+        node-group: agents
+      securityContext:
+        fsGroup: 999
+      containers:
+        - name: postgres
+          image: postgres:17.11
+          ports:
+            - name: postgres
+              containerPort: 5432
+          env:
+            - name: POSTGRES_USER
+              value: postgres
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: password
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+            - name: initdb
+              mountPath: /docker-entrypoint-initdb.d
+              readOnly: true
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "postgres"]
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", "postgres"]
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 1Gi
+      volumes:
+        - name: initdb
+          secret:
+            secretName: postgres-initdb
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 10Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: agents
+spec:
+  selector:
+    app.kubernetes.io/name: postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres

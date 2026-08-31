@@ -1,0 +1,101 @@
+# Нет вменяемого официального Helm-чарта (community-чарты либо неподдерживаемые,
+# либо их репозитории мертвы — проверено) — raw manifests по образцу
+# официального docker-compose.yaml проекта (docker/images/docker-compose.yaml
+# в penpot/penpot). Три независимых контейнера, как в compose:
+# backend/frontend/exporter — здесь тремя Deployment.
+#
+# PENPOT_OBJECTS_STORAGE_BACKEND: fs — файлы ассетов на локальном PVC
+# (penpot-assets), без S3 (не требуется для задачи "пережить рестарт пода").
+# strategy: Recreate — та же причина, что registry/ingress-nginx: RWO PVC +
+# единственная нода делают RollingUpdate тупиковым.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: penpot-backend
+  namespace: agents
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: penpot-backend
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: penpot-backend
+    spec:
+      nodeSelector:
+        node-group: agents
+      containers:
+        - name: backend
+          image: penpotapp/backend:2.17
+          ports:
+            - name: http
+              containerPort: 6060
+          env:
+            - name: PENPOT_FLAGS
+              value: "disable-email-verification enable-registration disable-secure-session-cookies"
+            - name: PENPOT_PUBLIC_URI
+              value: https://penpot.agents.${base_domain}
+            - name: PENPOT_HTTP_SERVER_MAX_BODY_SIZE
+              value: "367001600"
+            - name: PENPOT_HTTP_SERVER_MAX_MULTIPART_BODY_SIZE
+              value: "367001600"
+            - name: PENPOT_TELEMETRY_ENABLED
+              value: "false"
+            - name: PENPOT_OBJECTS_STORAGE_BACKEND
+              value: fs
+            - name: PENPOT_OBJECTS_STORAGE_FS_DIRECTORY
+              value: /opt/data/assets
+            - name: PENPOT_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: penpot-credentials
+                  key: PENPOT_SECRET_KEY
+            - name: PENPOT_DATABASE_URI
+              valueFrom:
+                secretKeyRef:
+                  name: penpot-credentials
+                  key: PENPOT_DATABASE_URI
+            - name: PENPOT_DATABASE_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: penpot-credentials
+                  key: PENPOT_DATABASE_USERNAME
+            - name: PENPOT_DATABASE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: penpot-credentials
+                  key: PENPOT_DATABASE_PASSWORD
+            - name: PENPOT_REDIS_URI
+              valueFrom:
+                secretKeyRef:
+                  name: penpot-credentials
+                  key: PENPOT_REDIS_URI
+          volumeMounts:
+            - name: assets
+              mountPath: /opt/data/assets
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 1Gi
+      volumes:
+        - name: assets
+          persistentVolumeClaim:
+            claimName: penpot-assets
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: penpot-backend
+  namespace: agents
+spec:
+  selector:
+    app.kubernetes.io/name: penpot-backend
+  ports:
+    - name: http
+      port: 6060
+      targetPort: http

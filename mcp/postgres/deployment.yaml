@@ -1,0 +1,54 @@
+# crystaldba/postgres-mcp, SSE-транспорт, только внутрикластерная доступность
+# (ClusterIP, без Ingress) — n8n дёргает его как MCP tool через
+# postgres-mcp.agents.svc.cluster.local:8000/sse.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres-mcp
+  namespace: agents
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: postgres-mcp
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: postgres-mcp
+    spec:
+      nodeSelector:
+        node-group: agents
+      containers:
+        - name: postgres-mcp
+          image: crystaldba/postgres-mcp:latest
+          args:
+            - "--access-mode=restricted"
+            - "--transport=sse"
+          env:
+            - name: DATABASE_URI
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-mcp-credentials
+                  key: DATABASE_URI
+          ports:
+            - name: http
+              containerPort: 8000
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-mcp
+  namespace: agents
+spec:
+  selector:
+    app.kubernetes.io/name: postgres-mcp
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http

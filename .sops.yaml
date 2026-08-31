@@ -1,0 +1,8 @@
+# Тот же age-recipient, что в unitum-demo-k8s-infra (.sops.yaml там же) — приватный
+# half уже сидит в кластере как Secret sops-age (namespace flux-system), второй
+# age-ключ заводить не нужно: шифрование новых секретов делается публичным ключом,
+# расшифровка на кластере идёт через уже существующий sops-age.
+creation_rules:
+  - path_regex: .*/agents-secrets\.yaml$
+    encrypted_regex: ^(data|stringData)$
+    age: age12027sd7thr9k2kr3aqkpdcl82zjg74cyqnu0shw7jyzq6ghszedqaezvej

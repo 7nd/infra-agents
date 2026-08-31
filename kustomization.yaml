@@ -1,0 +1,26 @@
+# Раскатывается Flux Kustomization infrastructure-agents-stack (см.
+# clusters/demo/infrastructure.yaml в unitum-demo-k8s-infra), путь ./.
+# bootstrap/ сюда сознательно НЕ входит — та раскатывается отдельной,
+# более ранней Kustomization (infrastructure-agents-vars), см. её
+# kustomization.yaml.
+#
+# Порядок elements здесь неважен для Kustomize (он не определяет порядок
+# apply), реальный порядок раскатки — через Flux dependsOn на уровне
+# Kustomization CR, а внутри Kubernetes сам разруливает через readiness
+# зависимых ресурсов (Postgres/Valkey Service существуют сразу, поды
+# приложений просто будут CrashLoopBackOff/retry, пока БД не готова).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - namespace.yaml
+  - certificate.yaml
+  - sources
+  - postgres
+  - valkey
+  - qdrant
+  - n8n
+  - forgejo
+  - forgejo-runner
+  - glitchtip
+  - penpot
+  - mcp

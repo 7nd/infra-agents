@@ -1,0 +1,66 @@
+# Официальный образ Microsoft (mcr.microsoft.com/playwright/mcp), HTTP-режим
+# через переопределение entrypoint (см. официальный пример в репозитории
+# microsoft/playwright-mcp: docker run --entrypoint node ... /app/cli.js
+# --port --host 0.0.0.0). /dev/shm расширен через emptyDir — дефолтные 64Mi
+# у Kubernetes-подов слишком малы для headless Chromium, падает с SIGBUS/
+# crash без этого практически сразу на сколько-нибудь тяжёлых страницах.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: playwright-mcp
+  namespace: agents
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: playwright-mcp
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: playwright-mcp
+    spec:
+      nodeSelector:
+        node-group: agents
+      containers:
+        - name: playwright-mcp
+          image: mcr.microsoft.com/playwright/mcp:latest
+          command: ["node", "/app/cli.js"]
+          args:
+            - "--headless"
+            - "--browser"
+            - "chromium"
+            - "--no-sandbox"
+            - "--port"
+            - "8931"
+            - "--host"
+            - "0.0.0.0"
+          ports:
+            - name: http
+              containerPort: 8931
+          volumeMounts:
+            - name: dshm
+              mountPath: /dev/shm
+          resources:
+            requests:
+              cpu: 100m
+              memory: 512Mi
+            limits:
+              memory: 1Gi
+      volumes:
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: playwright-mcp
+  namespace: agents
+spec:
+  selector:
+    app.kubernetes.io/name: playwright-mcp
+  ports:
+    - name: http
+      port: 8931
+      targetPort: http

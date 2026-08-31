@@ -1,0 +1,14 @@
+# Общий том для ассетов (аплоады, экспортированные файлы) — монтируется и
+# backend'ом, и frontend'ом. RWO работает для двух подов одновременно только
+# потому, что оба закреплены на одной и той же ноде (node-group=agents,
+# единственная в группе) — RWO ограничивает том одной НОДОЙ, не одним подом.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: penpot-assets
+  namespace: agents
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 10Gi

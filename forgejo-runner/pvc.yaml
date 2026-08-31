@@ -1,0 +1,14 @@
+# Только под файл .runner (регистрационное состояние раннера) — чтобы не
+# перерегистрироваться (и не плодить дубликаты раннеров в Forgejo) при
+# каждом рестарте пода. Кеш docker-слоёв самого dind-сайдкара — в отдельном
+# emptyDir (не входит в DoD п.8, не критично потерять при рестарте).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: forgejo-runner-data
+  namespace: agents
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 1Gi

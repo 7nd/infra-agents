@@ -1,0 +1,85 @@
+# Официальный образ valkey/valkey:9.1-alpine (точное совпадение с SBOM), raw
+# StatefulSet вместо чарта — тот же резон, что Postgres (единственный
+# инстанс, не стоит тащить чарт-зависимость ради одного объекта).
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: valkey
+  namespace: agents
+spec:
+  serviceName: valkey
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: valkey
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: valkey
+    spec:
+      nodeSelector:
+        node-group: agents
+      containers:
+        - name: valkey
+          image: valkey/valkey:9.1-alpine
+          command: ["valkey-server"]
+          args:
+            - /etc/valkey/valkey.conf
+            - --requirepass
+            - $(VALKEY_PASSWORD)
+          env:
+            - name: VALKEY_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: valkey-credentials
+                  key: password
+          ports:
+            - name: valkey
+              containerPort: 6379
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: config
+              mountPath: /etc/valkey
+              readOnly: true
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", "valkey-cli -a \"$VALKEY_PASSWORD\" --no-auth-warning ping"]
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            exec:
+              command: ["sh", "-c", "valkey-cli -a \"$VALKEY_PASSWORD\" --no-auth-warning ping"]
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+      volumes:
+        - name: config
+          configMap:
+            name: valkey-config
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 2Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: valkey
+  namespace: agents
+spec:
+  selector:
+    app.kubernetes.io/name: valkey
+  ports:
+    - name: valkey
+      port: 6379
+      targetPort: valkey

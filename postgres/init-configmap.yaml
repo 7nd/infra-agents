@@ -1,0 +1,44 @@
+# Выполняется один раз при первой инициализации PGDATA (официальный образ
+# postgres прогоняет всё из /docker-entrypoint-initdb.d по алфавиту при
+# пустом дата-каталоге). 5 баз: по одной на n8n/forgejo/glitchtip/penpot
+# (собственное состояние приложений) + agents — общая рабочая база для
+# workflow'ов n8n (сессионная память ролей, аудит-трейл PM, см. SBOM) и
+# именно она — цель read-only MCP-роли (закрывает DoD п.7).
+#
+# mcp_readonly: CONNECT только на agents (на остальные три явно отозван у
+# PUBLIC), SELECT-only + ALTER DEFAULT PRIVILEGES, чтобы будущие таблицы
+# наследовали то же самое. Никаких INSERT/UPDATE/DELETE не выдаётся вообще —
+# это не полагается только на флаг --access-mode=restricted самого MCP-сервера
+# (defense-in-depth), проверяется явной попыткой записи через сам MCP-tool.
+#
+# Secret, а не ConfigMap: 02-mcp-readonly-role.sql содержит подставленный
+# ${postgres_mcp_readonly_password} — секретный материал не должен лежать
+# в ConfigMap открытым текстом.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: postgres-initdb
+  namespace: agents
+stringData:
+  01-databases.sql: |
+    CREATE DATABASE n8n;
+    CREATE DATABASE forgejo;
+    CREATE DATABASE glitchtip;
+    CREATE DATABASE penpot;
+    CREATE DATABASE agents;
+
+    REVOKE CONNECT ON DATABASE n8n FROM PUBLIC;
+    REVOKE CONNECT ON DATABASE forgejo FROM PUBLIC;
+    REVOKE CONNECT ON DATABASE glitchtip FROM PUBLIC;
+    REVOKE CONNECT ON DATABASE penpot FROM PUBLIC;
+
+  02-mcp-readonly-role.sql: |
+    CREATE ROLE mcp_readonly WITH LOGIN PASSWORD '${postgres_mcp_readonly_password}';
+    GRANT CONNECT ON DATABASE agents TO mcp_readonly;
+
+  03-mcp-readonly-grants.sql: |
+    \connect agents
+    GRANT USAGE ON SCHEMA public TO mcp_readonly;
+    GRANT SELECT ON ALL TABLES IN SCHEMA public TO mcp_readonly;
+    ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO mcp_readonly;
+    REVOKE CREATE ON SCHEMA public FROM mcp_readonly;

@@ -1,0 +1,15 @@
+# Пароль сюда не кладётся (это ConfigMap, не Secret) — requirepass передаётся
+# через --requirepass "$(VALKEY_PASSWORD)" в args контейнера (k8s сам
+# подставляет $(VAR) из env контейнера в command/args), значение приходит из
+# valkey-credentials (Secret).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: valkey-config
+  namespace: agents
+data:
+  valkey.conf: |
+    appendonly yes
+    appendfsync everysec
+    maxmemory-policy noeviction
+    dir /data

@@ -1,0 +1,70 @@
+# Community-чарт 8gears/n8n-helm-chart (oci://8gears.container-registry.com) —
+# нет официального чарта от n8n.io, этот широко используется в проде. Один
+# "main"-процесс (worker/webhook subcharts выключены по умолчанию — очередь
+# не нужна для демо-нагрузки одного стенда). persistence чарта по умолчанию
+# выключена (emptyDir) — это осознанно: n8n не входит в список stateful-
+# компонентов DoD п.8, всё, что должно пережить рестарт (workflow'ы,
+# credentials, execution log), у n8n и так уходит в Postgres при
+# DB_TYPE=postgresdb.
+#
+# LLM-креды (Anthropic/OpenRouter credential) сюда не заводятся значениями
+# чарта — у n8n это создаётся через UI (credential entity, зашифрован
+# N8N_ENCRYPTION_KEY и живёт в Postgres), а не через переменные окружения;
+# ключ и Base URL придут от пользователя позже (см. README).
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: n8n
+  namespace: agents
+spec:
+  interval: 30m
+  chartRef:
+    kind: OCIRepository
+    name: n8n
+    namespace: flux-system
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      retries: 3
+  values:
+    ingress:
+      enabled: true
+      className: ${ingress_class}
+      hosts:
+        - host: n8n.agents.${base_domain}
+          paths:
+            - path: /
+              pathType: Prefix
+      tls:
+        - hosts:
+            - n8n.agents.${base_domain}
+          secretName: wildcard-agents-tls
+    main:
+      nodeSelector:
+        node-group: agents
+      config:
+        n8n:
+          host: n8n.agents.${base_domain}
+          protocol: https
+          editor_base_url: https://n8n.agents.${base_domain}/
+        db:
+          type: postgresdb
+          postgresdb:
+            host: postgres.agents.svc.cluster.local
+            port: 5432
+            database: n8n
+            user: postgres
+      secret:
+        n8n:
+          encryption_key: ${n8n_encryption_key}
+        db:
+          postgresdb:
+            password: ${postgres_admin_password}
+      resources:
+        requests:
+          cpu: 100m
+          memory: 256Mi
+        limits:
+          memory: 1Gi

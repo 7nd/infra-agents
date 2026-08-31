@@ -1,0 +1,27 @@
+# n8n и Forgejo публикуются как OCI-чарты (не classic HelmRepository) —
+# тот же паттерн, что cert-manager в unitum-demo-k8s-infra
+# (infrastructure/sources/ocirepositories.yaml там же).
+apiVersion: source.toolkit.fluxcd.io/v1beta2
+kind: OCIRepository
+metadata:
+  name: n8n
+  namespace: flux-system
+spec:
+  interval: 1h
+  url: oci://8gears.container-registry.com/library/n8n
+  ref:
+    semver: "2.x"
+---
+# appVersion дефолтного чарта тянет non-LTS ветку Forgejo (16.x) — сам образ
+# пинуется явно на LTS в forgejo/release.yaml (values.image.tag), чарт здесь
+# используется только как деплой-механизм.
+apiVersion: source.toolkit.fluxcd.io/v1beta2
+kind: OCIRepository
+metadata:
+  name: forgejo
+  namespace: flux-system
+spec:
+  interval: 1h
+  url: oci://code.forgejo.org/forgejo-helm/forgejo
+  ref:
+    semver: "17.x"

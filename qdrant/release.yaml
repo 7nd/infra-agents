@@ -1,0 +1,43 @@
+# Официальный чарт qdrant/qdrant-helm — StatefulSet под капотом (не
+# Deployment), поэтому не нужен отдельный updateStrategy: Recreate на
+# единственной ноде. apiKey — через valueFrom.secretKeyRef на секрет,
+# сгенерированный заранее (qdrant-api-key), а не auto-generate чартом: этот
+# же ключ нужен n8n (Qdrant credential) и его должен знать я, а не только
+# сам чарт.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: qdrant
+  namespace: agents
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: qdrant
+      version: "1.19.x"
+      sourceRef:
+        kind: HelmRepository
+        name: qdrant
+        namespace: flux-system
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      retries: 3
+  values:
+    nodeSelector:
+      node-group: agents
+    apiKey:
+      valueFrom:
+        secretKeyRef:
+          name: qdrant-api-key
+          key: api-key
+    persistence:
+      size: 10Gi
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        memory: 1Gi

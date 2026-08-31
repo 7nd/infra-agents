@@ -1,0 +1,22 @@
+# Один wildcard-сертификат на весь поддомен *.agents.${base_domain}, тем же
+# приёмом, что infrastructure/apps/demo-stands/certificate.yaml в
+# unitum-demo-k8s-infra — 4 внешних Ingress этого стенда (n8n, forgejo,
+# glitchtip, penpot) ссылаются на secretName: wildcard-agents-tls напрямую,
+# БЕЗ своей аннотации cert-manager.io/cluster-issuer (иначе ingress-shim
+# наплодит per-host сертификаты поверх этого wildcard'а).
+#
+# selector.dnsZones: [${base_domain}] у ClusterIssuer letsencrypt уже покрывает
+# agents.${base_domain} — это не отдельная зона в Cloudflare, обычный
+# саб-домен внутри ${base_domain}, отдельный solver не нужен.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: wildcard-agents
+  namespace: agents
+spec:
+  secretName: wildcard-agents-tls
+  issuerRef:
+    name: letsencrypt
+    kind: ClusterIssuer
+  dnsNames:
+    - "*.agents.${base_domain}"

@@ -1,0 +1,73 @@
+# Nginx-образ, генерирует nginx.conf на старте по PENPOT_BACKEND_URI/
+# PENPOT_EXPORTER_URI (entrypoint-скрипт образа, envsubst-подстановка) —
+# явно указываю k8s Service DNS-имена backend/exporter, а не полагаюсь на
+# дефолт из docker-compose (там имена контейнеров совпадали с сервисами
+# из коробки).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: penpot-frontend
+  namespace: agents
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: penpot-frontend
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: penpot-frontend
+    spec:
+      nodeSelector:
+        node-group: agents
+      containers:
+        - name: frontend
+          image: penpotapp/frontend:2.17
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: PENPOT_FLAGS
+              value: "disable-email-verification enable-registration disable-secure-session-cookies"
+            - name: PENPOT_PUBLIC_URI
+              value: https://penpot.agents.${base_domain}
+            - name: PENPOT_HTTP_SERVER_MAX_BODY_SIZE
+              value: "367001600"
+            - name: PENPOT_HTTP_SERVER_MAX_MULTIPART_BODY_SIZE
+              value: "367001600"
+            - name: PENPOT_BACKEND_URI
+              value: http://penpot-backend.agents.svc.cluster.local:6060
+            - name: PENPOT_EXPORTER_URI
+              value: http://penpot-exporter.agents.svc.cluster.local:6061
+          volumeMounts:
+            - name: assets
+              mountPath: /opt/data/assets
+          readinessProbe:
+            httpGet: {path: /, port: http}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+      volumes:
+        - name: assets
+          persistentVolumeClaim:
+            claimName: penpot-assets
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: penpot-frontend
+  namespace: agents
+spec:
+  selector:
+    app.kubernetes.io/name: penpot-frontend
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http

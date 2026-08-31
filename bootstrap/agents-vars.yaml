@@ -1,0 +1,15 @@
+# Несекретные параметры стенда — аналог cluster-vars.yaml в unitum-demo-k8s-infra,
+# но отдельным объектом (agents-vars, не cluster-vars): раскатывается ОТДЕЛЬНОЙ
+# Kustomization (infrastructure-agents-vars) до того, как остальной стек начнёт
+# postBuild.substituteFrom его читать. base_domain/ingress_class сюда не
+# дублируются — они приходят из уже существующего cluster-vars (та же
+# Kustomization читает оба ConfigMap).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: agents-vars
+  namespace: flux-system
+data:
+  forgejo_admin_username: "agentbot"
+  admin_email: "devops@hightps.online"
+  glitchtip_organization: "agents-team"

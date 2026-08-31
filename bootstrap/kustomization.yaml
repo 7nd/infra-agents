@@ -1,0 +1,9 @@
+# Раскатывается ОТДЕЛЬНОЙ Flux Kustomization (infrastructure-agents-vars, см.
+# clusters/demo/infrastructure.yaml в unitum-demo-k8s-infra) до остального
+# стенда — agents-vars/agents-secrets должны существовать в кластере ДО того,
+# как остальные манифесты начнут postBuild.substituteFrom их читать.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - agents-vars.yaml
+  - agents-secrets.yaml

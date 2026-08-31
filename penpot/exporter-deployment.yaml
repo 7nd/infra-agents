@@ -1,0 +1,60 @@
+# Exporter не держит собственного состояния и не читает Postgres напрямую —
+# только Valkey (координация через websocket) и внутренний HTTP до frontend
+# (рендерит страницы фронтенда headless-браузером для экспорта в PDF/PNG/SVG).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: penpot-exporter
+  namespace: agents
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: penpot-exporter
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: penpot-exporter
+    spec:
+      nodeSelector:
+        node-group: agents
+      containers:
+        - name: exporter
+          image: penpotapp/exporter:2.17
+          ports:
+            - name: http
+              containerPort: 6061
+          env:
+            - name: PENPOT_PUBLIC_URI
+              value: https://penpot.agents.${base_domain}
+            - name: PENPOT_INTERNAL_URI
+              value: http://penpot-frontend.agents.svc.cluster.local:8080
+            - name: PENPOT_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: penpot-credentials
+                  key: PENPOT_SECRET_KEY
+            - name: PENPOT_REDIS_URI
+              valueFrom:
+                secretKeyRef:
+                  name: penpot-credentials
+                  key: PENPOT_REDIS_URI
+          resources:
+            requests:
+              cpu: 50m
+              memory: 256Mi
+            limits:
+              memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: penpot-exporter
+  namespace: agents
+spec:
+  selector:
+    app.kubernetes.io/name: penpot-exporter
+  ports:
+    - name: http
+      port: 6061
+      targetPort: http

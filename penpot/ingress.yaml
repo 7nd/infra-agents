@@ -1,0 +1,24 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: penpot
+  namespace: agents
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "0"
+spec:
+  ingressClassName: ${ingress_class}
+  tls:
+    - hosts:
+        - penpot.agents.${base_domain}
+      secretName: wildcard-agents-tls
+  rules:
+    - host: penpot.agents.${base_domain}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: penpot-frontend
+                port:
+                  number: 8080
