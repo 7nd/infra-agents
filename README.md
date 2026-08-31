@@ -73,9 +73,8 @@ images/glitchtip-mcp/       # Dockerfile: supergateway + glitchtip-mcp (npm), с
 
 `bootstrap/agents-secrets.yaml` (SOPS) уже содержит все пароли/ключи, которые
 можно было сгенерировать заранее (postgres/valkey/qdrant/n8n/glitchtip/penpot/
-forgejo admin, включая `forgejo_actions_runner_secret` — см. ниже почему он не
-chicken-egg). Четыре значения — заглушки (`""`), заполняются вручную ПОСЛЕ
-первого успешного деплоя:
+forgejo admin). Остальные — заглушки (`""`), заполняются вручную ПОСЛЕ первого
+успешного деплоя:
 
 1. **`forgejo_bot_token`** — Personal Access Token бота `${forgejo_admin_username}`
    для MCP Forgejo/Git и (при необходимости) n8n:
@@ -84,15 +83,17 @@ chicken-egg). Четыре значения — заглушки (`""`), зап�
      --username agentbot --scopes write:repository,write:issue,read:user \
      --raw
    ```
-2. **Forgejo Actions runner** — `forgejo_actions_runner_secret` УЖЕ настоящий
-   (сгенерирован заранее, я сам выбрал значение) — единственное, что нужно
-   сделать руками: зарегистрировать этот secret на стороне сервера (offline-
-   регистрация, без обращения к runner UI):
+2. **`forgejo_actions_runner_secret`** — офлайн-регистрация раннера
+   собственным заранее выбранным секретом (`forgejo-cli actions register
+   --secret`) на практике не сработала — CLI отвечает успехом, но раннер
+   всё равно получает "runner registration token not found" при коннекте.
+   Рабочий путь — сгенерировать одноразовый токен сервером:
    ```sh
-   kubectl -n agents exec deploy/forgejo -- forgejo forgejo-cli actions register \
-     --secret "$(SOPS_AGE_KEY_FILE=<path-to-age.agekey> sops -d bootstrap/agents-secrets.yaml | yq '.stringData.forgejo_actions_runner_secret')"
+   kubectl -n agents exec deploy/forgejo -- forgejo forgejo-cli actions generate-runner-token
    ```
-   Раннер сам зарегистрируется при следующем старте пода (init-контейнер).
+   Значение — в SOPS (см. ниже), после чего пересоздать под раннера
+   (`kubectl -n agents delete pod -l app.kubernetes.io/name=forgejo-runner`),
+   чтобы init-контейнер зарегистрировался заново.
 3. **`glitchtip_mcp_token`** — API-токен в GlitchTip для организации
    `${glitchtip_organization}` (создать организацию и токен через UI/API после
    первого логина администратора).
@@ -120,6 +121,35 @@ SOPS_AGE_KEY_FILE=<path-to-age.agekey> sops --set '["stringData"]["forgejo_bot_t
 INSERT INTO information_schema.tables VALUES (...);
 -- ERROR: permission denied for schema public
 ```
+
+## Cloudflare-прокси и поддомены второго уровня
+
+Cloudflare Free Universal SSL покрывает только `${base_domain}` и
+`*.${base_domain}` (один уровень wildcard) — НЕ `*.agents.${base_domain}`
+(второй уровень). Обнаружено вживую при первом деплое: все 4 внешних
+Ingress получали `TLS handshake failure` на этапе соединения с Cloudflare,
+причём и изнутри кластера, и с полностью внешнего клиента (то есть не
+hairpin/NAT-эффект self-hosted кластера, а именно ограничение сертификата
+на стороне Cloudflare) — при этом сам ingress-nginx с тем же SNI напрямую по
+IP отдаёт корректный `*.agents.${base_domain}` сертификат (проверено через
+`openssl s_client`). Фикс — аннотация `external-dns.alpha.kubernetes.io/
+cloudflare-proxied: "false"` на всех четырёх внешних Ingress: записи
+резолвятся напрямую на origin, без прокси-слоя, TLS — тот же Let's Encrypt
+сертификат на ingress-nginx. Тем же приёмом (и по той же причине —
+Cloudflare Free плохо держит длинные бинарные chunked-transfer'ы, отдельно
+от wildcard-ограничения) пришлось поправить и `registry.${base_domain}` в
+`unitum-demo-k8s-infra` — доставка образа `glitchtip-mcp` стабильно рвалась
+на середине пула, пока прокси не отключили и там.
+
+## Внутрикластерные вызовы — только internal Service DNS
+
+`forgejo-runner`, `mcp/forgejo-git` и `mcp/glitchtip` обращаются к
+Forgejo/GlitchTip через internal Service (`forgejo-http.agents.svc.cluster.
+local:3000`, `glitchtip-web.agents.svc.cluster.local`), а не через публичный
+`https://<app>.agents.${base_domain}` — service-to-service трафик внутри
+namespace не должен зависеть ни от внешнего DNS, ни от Cloudflare, ни даже
+от TLS. Только четыре внешних Ingress (n8n, forgejo, glitchtip, penpot)
+рассчитаны на людей и используют публичные хосты.
 
 ## Что сознательно не сделано
 
