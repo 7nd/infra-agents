@@ -1,11 +1,10 @@
-# Community-чарт 8gears/n8n-helm-chart (oci://8gears.container-registry.com) —
-# нет официального чарта от n8n.io, этот широко используется в проде. Один
-# "main"-процесс (worker/webhook subcharts выключены по умолчанию — очередь
-# не нужна для демо-нагрузки одного стенда). persistence чарта по умолчанию
-# выключена (emptyDir) — это осознанно: n8n не входит в список stateful-
-# компонентов DoD п.8, всё, что должно пережить рестарт (workflow'ы,
-# credentials, execution log), у n8n и так уходит в Postgres при
-# DB_TYPE=postgresdb.
+# community-charts/n8n (classic HelmRepository) — см. sources/helmrepositories.yaml
+# про то, почему не 8gears/OCI. Один "main"-процесс (worker/webhook — по
+# умолчанию у чарта их replicaCount 0/выключены — очередь не нужна для
+# демо-нагрузки одного стенда). persistence чарта по умолчанию выключена —
+# осознанно: n8n не входит в список stateful-компонентов DoD п.8, всё что
+# должно пережить рестарт (workflow'ы, credentials, execution log) уходит в
+# Postgres через db.type: postgresdb.
 #
 # LLM-креды (Anthropic/OpenRouter credential) сюда не заводятся значениями
 # чарта — у n8n это создаётся через UI (credential entity, зашифрован
@@ -18,10 +17,14 @@ metadata:
   namespace: agents
 spec:
   interval: 30m
-  chartRef:
-    kind: OCIRepository
-    name: n8n
-    namespace: flux-system
+  chart:
+    spec:
+      chart: n8n
+      version: "1.24.x"
+      sourceRef:
+        kind: HelmRepository
+        name: community-charts
+        namespace: flux-system
   install:
     remediation:
       retries: 3
@@ -29,6 +32,18 @@ spec:
     remediation:
       retries: 3
   values:
+    nodeSelector:
+      node-group: agents
+    existingEncryptionKeySecret: n8n-encryption-key
+    db:
+      type: postgresdb
+    externalPostgresql:
+      host: postgres.agents.svc.cluster.local
+      port: 5432
+      username: postgres
+      database: n8n
+      existingSecret: postgres-credentials
+      existingSecretPasswordKey: password
     ingress:
       enabled: true
       className: ${ingress_class}
@@ -42,26 +57,6 @@ spec:
             - n8n.agents.${base_domain}
           secretName: wildcard-agents-tls
     main:
-      nodeSelector:
-        node-group: agents
-      config:
-        n8n:
-          host: n8n.agents.${base_domain}
-          protocol: https
-          editor_base_url: https://n8n.agents.${base_domain}/
-        db:
-          type: postgresdb
-          postgresdb:
-            host: postgres.agents.svc.cluster.local
-            port: 5432
-            database: n8n
-            user: postgres
-      secret:
-        n8n:
-          encryption_key: ${n8n_encryption_key}
-        db:
-          postgresdb:
-            password: ${postgres_admin_password}
       resources:
         requests:
           cpu: 100m

@@ -7,6 +7,25 @@ spec:
   interval: 1h
   url: https://qdrant.github.io/qdrant-helm
 ---
+# n8n изначально был на OCI (oci://8gears.container-registry.com/library/n8n,
+# см. git-историю) — заменён на classic HelmRepository после того, как
+# source-controller (v1.4.1) на живом кластере вечно завис на "building
+# artifact" для этого конкретного OCI-registry без единой ошибки/лога (ни
+# semver, ни пин на точный тег не помогли), при том что forgejo (другой OCI-
+# registry) резолвится нормально — похоже на blackhole на конкретном
+# сетевом хопе этого self-hosted кластера, тот же паттерн, что уже описан в
+# unitum-demo-k8s-infra про charts.jetstack.io. Chart того же проекта
+# (community-charts/n8n, appVersion 2.36.8 — в диапазоне SBOM 2.35.x+),
+# просто другая схема values (см. n8n/release.yaml).
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: community-charts
+  namespace: flux-system
+spec:
+  interval: 1h
+  url: https://community-charts.github.io/helm-charts
+---
 # Официальный чарт проекта GlitchTip, публикуется в GitLab Package Registry
 # (не на ArtifactHub-агрегаторах вроде helm.glitchtip.com — тот домен не отдаёт
 # валидный index.yaml).
