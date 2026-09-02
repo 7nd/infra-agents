@@ -13,7 +13,9 @@
 # кастомных образов.
 FROM python:3.12-slim
 
-RUN pip install --no-cache-dir "mcp[cli]" kubernetes
+# mcp>=2 переименовал FastMCP -> MCPServer с другим API — пинуем v1 ветку,
+# под которую написан server.py (mcp.server.fastmcp.FastMCP).
+RUN pip install --no-cache-dir "mcp[cli]<2" kubernetes
 
 COPY server.py /app/server.py
 WORKDIR /app
