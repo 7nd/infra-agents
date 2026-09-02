@@ -6,3 +6,4 @@ resources:
   - forgejo-git
   - glitchtip
   - k8s-diag
+  - helm-mcp

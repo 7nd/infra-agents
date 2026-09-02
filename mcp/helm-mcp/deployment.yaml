@@ -1,0 +1,51 @@
+# Кастомный образ (см. images/helm-mcp), собран через in-cluster BuildKit и
+# запушен в приватный registry.${base_domain} вручную, одноразово — тот же
+# приём, что glitchtip-mcp/k8s-diag-mcp.
+#
+# Никакого serviceAccountName/RBAC — этот под вообще не обращается к
+# Kubernetes API кластера (см. server.py): helm работает против публичных
+# chart-репозиториев, kubeconform — против офлайн-схем.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: helm-mcp
+  namespace: agents
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: helm-mcp
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: helm-mcp
+    spec:
+      nodeSelector:
+        node-group: agents
+      imagePullSecrets:
+        - name: registry-pull-secret
+      containers:
+        - name: helm-mcp
+          image: registry.${base_domain}/helm-mcp:latest
+          ports:
+            - name: http
+              containerPort: 8080
+          resources:
+            requests:
+              cpu: 25m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: helm-mcp
+  namespace: agents
+spec:
+  selector:
+    app.kubernetes.io/name: helm-mcp
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
