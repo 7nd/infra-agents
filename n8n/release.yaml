@@ -68,6 +68,22 @@ spec:
             - n8n.agents.${base_domain}
           secretName: wildcard-agents-tls
     main:
+      # N8N_BLOCK_ENV_ACCESS_IN_NODE=false — по умолчанию чарт/n8n запрещают
+      # $env изнутри Code/Code Tool нод ("access to env vars denied",
+      # проверено вживую); без этого extraEnv ниже физически недостижим
+      # для forgejo_* Code Tool нод ops-агента. (extraEnvVars — а не
+      # deprecated top-level extraEnvVars/extraEnv чарта.)
+      extraEnvVars:
+        N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"
+      # FORGEJO_BOT_TOKEN — читается ops-агентом как $env.FORGEJO_BOT_TOKEN
+      # внутри forgejo_create_repo/get_file/put_file (Code Tool ноды),
+      # вместо литерала токена в теле JS. См. forgejo-token-secret.yaml.
+      extraEnv:
+        - name: FORGEJO_BOT_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: n8n-forgejo-token
+              key: FORGEJO_BOT_TOKEN
       resources:
         requests:
           cpu: 100m
