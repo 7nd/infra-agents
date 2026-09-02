@@ -51,6 +51,13 @@ spec:
         # Cloudflare Free Universal SSL не покрывает *.agents.${base_domain}
         # (второй уровень wildcard) — см. penpot/ingress.yaml, тот же фикс.
         external-dns.alpha.kubernetes.io/cloudflare-proxied: "false"
+        # Дефолтный proxy-read/send-timeout ingress-nginx (60s) обрубает
+        # синхронный вебхук чат-триггера ops-агента раньше, чем AI Agent
+        # успевает пройти длинную цепочку tool-calls (создание репо + запись
+        # нескольких файлов + reconcile) — клиент получал 504 от nginx, хотя
+        # сама workflow либо ещё считала, либо вообще не успевала стартовать.
+        nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+        nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
       hosts:
         - host: n8n.agents.${base_domain}
           paths:
