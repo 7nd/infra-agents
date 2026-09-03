@@ -193,13 +193,44 @@ def finalize_deploy(name: str, wait_seconds: int = 20) -> str:
     git_repo_name = f"app-{name}"
     kustomization_name = f"app-{name}"
     errors: list[dict] = []
+    wait_seconds = max(0, min(wait_seconds, 60))
 
-    for kind, obj_name in (("GitRepository", git_repo_name), ("Kustomization", kustomization_name)):
+    # register_app_in_control_repo only commits apps/<name>.yaml to git — the
+    # app's OWN GitRepository/Kustomization objects don't exist in the
+    # cluster until Flux reconciles the CONTROL repo itself and applies that
+    # new file. Reconcile that chain first, or the app-level reconcile below
+    # 404s every time on a freshly registered app (observed live: this was
+    # previously the only reconcile attempted here, and always failed with
+    # flux.not_found immediately after register_app_in_control_repo).
+    for kind, obj_name in (("GitRepository", "ops-control"), ("Kustomization", "infrastructure-ops-control")):
         r = _flux_reconcile_dict(kind, obj_name)
         if not r["ok"]:
             errors.append({"error_code": r["error_code"], "message": f"reconcile {kind}/{obj_name}: {r['message']}"})
 
-    time.sleep(max(0, min(wait_seconds, 60)))
+    time.sleep(wait_seconds / 2)
+
+    app_objects_pending = False
+    for kind, obj_name in (("GitRepository", git_repo_name), ("Kustomization", kustomization_name)):
+        r = _flux_reconcile_dict(kind, obj_name)
+        if not r["ok"]:
+            if r["error_code"] == "flux.not_found":
+                # control-repo's own Kustomization hasn't applied
+                # apps/<name>.yaml yet — expected right after registration,
+                # not a real error. finalize_deploy is meant to be retried.
+                app_objects_pending = True
+            else:
+                errors.append({"error_code": r["error_code"], "message": f"reconcile {kind}/{obj_name}: {r['message']}"})
+
+    time.sleep(wait_seconds / 2)
+
+    if app_objects_pending:
+        return json.dumps({
+            "status": "pending",
+            "url": f"https://{name}.{BASE_DOMAIN}",
+            "flux_status": {},
+            "pods": [],
+            "errors": errors,
+        }, ensure_ascii=False)
 
     flux_status_result = _flux_get_dict("Kustomization", kustomization_name)
     ready = False
@@ -209,9 +240,15 @@ def finalize_deploy(name: str, wait_seconds: int = 20) -> str:
         flux_status = flux_status_result["status"]
         conditions = flux_status.get("conditions", [])
         ready_cond = next((c for c in conditions if c.get("type") == "Ready"), None)
+        # DependencyNotReady: this Kustomization's own dependsOn (e.g.
+        # infrastructure-ops-control, reconciled by finalize_deploy itself
+        # moments earlier) hasn't settled yet — observed live immediately
+        # after registration, resolves on its own within seconds, not a
+        # real failure any more than Progressing is.
+        _TRANSIENT_REASONS = {"Progressing", "DependencyNotReady"}
         if ready_cond and ready_cond.get("status") == "True":
             ready = True
-        elif ready_cond and ready_cond.get("status") == "False" and ready_cond.get("reason") == "Progressing":
+        elif ready_cond and ready_cond.get("status") == "False" and ready_cond.get("reason") in _TRANSIENT_REASONS:
             still_progressing = True
         elif ready_cond and ready_cond.get("status") == "False":
             errors.append({
