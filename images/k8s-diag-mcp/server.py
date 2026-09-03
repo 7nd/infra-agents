@@ -10,9 +10,11 @@ ServiceAccount'а, под которым запущен под (см. infra/mana
 и flux-rbac.yaml в unitum-demo-k8s-infra).
 """
 
+import base64
 import datetime
 import json
 import logging
+import re
 import time
 
 from kubernetes import client, config
@@ -312,6 +314,55 @@ def finalize_deploy(name: str, wait_seconds: int = 20) -> str:
         "pods": pods_summary,
         "errors": errors,
     }, ensure_ascii=False)
+
+
+_CREDENTIAL_KEY_PATTERN = re.compile(r"(password|passwd|token|secret[-_]?key|api[-_]?key)", re.IGNORECASE)
+_NOT_CREDENTIAL_KEY_PATTERN = re.compile(r"\.(crt|pem)$|^ca\.crt$", re.IGNORECASE)
+
+
+@mcp.tool()
+def get_app_credentials(name: str) -> str:
+    """Ищет сгенерированные чартом креды (пароли/токены) в Secret'ах
+    приложения — многие чарты (redis, postgresql, nexus и т.п. из Bitnami
+    и не только) при первом деплое генерируют случайный admin/root пароль
+    и кладут его в Secret, без этого тула пользователь не узнает его
+    иначе как руками через kubectl. Вызывай ТОЛЬКО после того, как
+    finalize_deploy вернул status="ready" для этого имени — креды
+    показывать имеет смысл только для подтверждённо успешного деплоя.
+
+    Ищет Secret'ы, чьё имя начинается с "<name>-" ИЛИ у которых лейбл
+    app.kubernetes.io/instance=<name> — та же конвенция именования, что и
+    у подов/Ingress этого приложения. Возвращает ТОЛЬКО ключи, похожие на
+    креды (password/token/secret-key/api-key) — не весь Secret целиком, и
+    явно не сертификаты (tls.crt/ca.crt/tls.key остаются скрыты — это не
+    креды приложения, это инфраструктурный TLS).
+
+    Возвращает {"ok": true, "credentials": [{"secret_name", "key",
+    "value"}, ...]} — пустой список значит "чарт не генерировал ничего
+    похожего на креды", не ошибка (большинство RawWorkload-приложений и
+    некоторые чарты вообще не создают Secret с паролем)."""
+    try:
+        secrets = core_v1.list_namespaced_secret(DIAG_NAMESPACE).items
+    except ApiException as e:
+        return json.dumps({"ok": False, "error_code": "k8s.api_error", "message": f"{e.status}: {e.reason}"})
+
+    credentials = []
+    for secret in secrets:
+        secret_name = secret.metadata.name
+        labels = secret.metadata.labels or {}
+        name_matches = secret_name.startswith(f"{name}-") or labels.get("app.kubernetes.io/instance") == name
+        if not name_matches or not secret.data:
+            continue
+        for key, b64_value in secret.data.items():
+            if _NOT_CREDENTIAL_KEY_PATTERN.search(key) or not _CREDENTIAL_KEY_PATTERN.search(key):
+                continue
+            try:
+                value = base64.b64decode(b64_value).decode("utf-8")
+            except (ValueError, UnicodeDecodeError):
+                continue  # binary value, not a printable credential — skip rather than emit garbage
+            credentials.append({"secret_name": secret_name, "key": key, "value": value})
+
+    return json.dumps({"ok": True, "credentials": credentials}, ensure_ascii=False)
 
 
 # plain HTTP passthrough for the deterministic graph (see helm-mcp's
