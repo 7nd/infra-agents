@@ -18,6 +18,8 @@ import time
 from kubernetes import client, config
 from kubernetes.client.rest import ApiException
 from mcp.server.fastmcp import FastMCP
+from starlette.requests import Request
+from starlette.responses import JSONResponse
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("k8s-diag-mcp")
@@ -131,7 +133,7 @@ def k8s_get(kind: str, namespace: str = DIAG_NAMESPACE, name: str | None = None)
     r = _k8s_get_dict(kind, namespace, name)
     if not r["ok"]:
         return _err(r["message"])
-    return r["raw"]
+    return json.dumps(r["raw"], ensure_ascii=False, default=str)
 
 
 @mcp.tool()
@@ -151,7 +153,7 @@ def flux_get(kind: str, name: str) -> str:
     r = _flux_get_dict(kind, name)
     if not r["ok"]:
         return _err(r["message"])
-    return r["status"]
+    return json.dumps(r["status"], ensure_ascii=False, default=str)
 
 
 @mcp.tool()
@@ -273,6 +275,45 @@ def finalize_deploy(name: str, wait_seconds: int = 20) -> str:
         "pods": pods_summary,
         "errors": errors,
     }, ensure_ascii=False)
+
+
+# plain HTTP passthrough for the deterministic graph (see helm-mcp's
+# server.py for the full rationale) — same tools, same validation, second
+# transport for non-agentic callers that have no MCP session.
+
+
+@mcp.custom_route("/call/{tool_name}", methods=["POST"])
+async def call_tool_route(request: Request) -> JSONResponse:
+    tool_name = request.path_params["tool_name"]
+    try:
+        arguments = await request.json()
+    except Exception:
+        arguments = {}
+    try:
+        result = await mcp.call_tool(tool_name, arguments)
+    except Exception as e:
+        return JSONResponse({"ok": False, "error_code": "mcp.call_failed", "message": str(e)})
+    # FastMCP.call_tool(..., convert_result=True) returns
+    # (list[ContentBlock], structured_content_dict) for a str-returning
+    # tool — structured_content is {"result": "<the str the tool returned>"}.
+    if isinstance(result, tuple) and len(result) == 2 and isinstance(result[1], dict) and "result" in result[1]:
+        text = result[1]["result"]
+        try:
+            return JSONResponse(json.loads(text))
+        except (json.JSONDecodeError, TypeError):
+            return JSONResponse({"raw": text})
+    if isinstance(result, dict):
+        return JSONResponse(result)
+    content_list = result[0] if isinstance(result, tuple) else result
+    try:
+        texts = [getattr(item, "text", None) for item in content_list if getattr(item, "text", None) is not None]
+    except TypeError:
+        return JSONResponse({"raw": str(result)})
+    text = "\n".join(t for t in texts if t)
+    try:
+        return JSONResponse(json.loads(text))
+    except (json.JSONDecodeError, TypeError):
+        return JSONResponse({"raw": text})
 
 
 if __name__ == "__main__":

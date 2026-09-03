@@ -40,6 +40,8 @@ from typing import Optional
 import yaml
 from mcp.server.fastmcp import FastMCP
 from pydantic import BaseModel, Field
+from starlette.requests import Request
+from starlette.responses import JSONResponse
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("helm-mcp")
@@ -568,6 +570,50 @@ def kustomize_build(files: dict[str, str]) -> str:
         error_code = "kustomize.missing_file" if "no such file or directory" in stderr else "kustomize.build_failed"
         return _err(error_code, stderr)
     return json.dumps({"ok": True, "rendered": res["stdout"]}, ensure_ascii=False)
+
+
+# --------------------------------------------------------------------------
+# plain HTTP passthrough — the n8n deterministic graph (point 10) calls
+# tools directly from Code nodes, not through an AI Agent's ai_tool
+# connection, so it has no MCP client/session to speak the SSE-framed
+# protocol with. This exposes the exact same registered tools (same
+# validation, same functions) over plain POST JSON — no new logic, just a
+# second transport for first-party, non-agentic callers.
+# --------------------------------------------------------------------------
+
+
+@mcp.custom_route("/call/{tool_name}", methods=["POST"])
+async def call_tool_route(request: Request) -> JSONResponse:
+    tool_name = request.path_params["tool_name"]
+    try:
+        arguments = await request.json()
+    except Exception:
+        arguments = {}
+    try:
+        result = await mcp.call_tool(tool_name, arguments)
+    except Exception as e:
+        return JSONResponse({"ok": False, "error_code": "mcp.call_failed", "message": str(e)})
+    # FastMCP.call_tool(..., convert_result=True) returns
+    # (list[ContentBlock], structured_content_dict) for a str-returning
+    # tool — structured_content is {"result": "<the str the tool returned>"}.
+    if isinstance(result, tuple) and len(result) == 2 and isinstance(result[1], dict) and "result" in result[1]:
+        text = result[1]["result"]
+        try:
+            return JSONResponse(json.loads(text))
+        except (json.JSONDecodeError, TypeError):
+            return JSONResponse({"raw": text})
+    if isinstance(result, dict):
+        return JSONResponse(result)
+    content_list = result[0] if isinstance(result, tuple) else result
+    try:
+        texts = [getattr(item, "text", None) for item in content_list if getattr(item, "text", None) is not None]
+    except TypeError:
+        return JSONResponse({"raw": str(result)})
+    text = "\n".join(t for t in texts if t)
+    try:
+        return JSONResponse(json.loads(text))
+    except (json.JSONDecodeError, TypeError):
+        return JSONResponse({"raw": text})
 
 
 if __name__ == "__main__":
