@@ -300,25 +300,41 @@ def _render_helm_repository(name: str, params: RenderParams) -> tuple[Optional[s
     return _yaml_dump(obj), None
 
 
-def _render_helm_release(name: str, params: RenderParams) -> tuple[Optional[str], Optional[dict]]:
+def _render_helm_release(name: str, params: RenderParams) -> tuple[Optional[str], Optional[dict], Optional[dict]]:
     missing = [f for f in ("chart", "chart_version", "helm_repository_name", "values_yaml") if not getattr(params, f)]
     if missing:
-        return None, {"error_code": "render.missing_param", "message": f"missing required params for kind=HelmRelease: {missing}"}
+        return None, {"error_code": "render.missing_param", "message": f"missing required params for kind=HelmRelease: {missing}"}, None
     try:
         values = yaml.safe_load(params.values_yaml) or {}
     except yaml.YAMLError as e:
-        return None, {"error_code": "values.yaml_unparseable", "message": str(e)}
+        return None, {"error_code": "values.yaml_unparseable", "message": str(e)}, None
+    detected_services = []
     if params.helm_repository_url:
         fail = _check_values_keys(params.helm_repository_url, params.chart, values, params.chart_version or "")
         if fail:
-            return None, fail
+            return None, fail, None
         tmpl_res = _run(
             ["helm", "template", "release", params.chart, "--repo", params.helm_repository_url,
              "-n", MANAGED_NAMESPACE, "-f", "-"] + (["--version", params.chart_version] if params.chart_version else []),
             input_text=params.values_yaml,
         )
         if tmpl_res["returncode"] != 0:
-            return None, {"error_code": "helm.template_error", "message": tmpl_res["stderr"]}
+            return None, {"error_code": "helm.template_error", "message": tmpl_res["stderr"]}, None
+        # render_manifest is the only place that already runs `helm template`
+        # for values-diff purposes — reuse that output to deterministically
+        # discover the chart's own Service objects (name + ports), instead
+        # of the caller having to guess a service name for kind=Ingress.
+        # Extract's schema (Appendix A) has no service_name/service_port
+        # slot for kind=chart at all, so this is the only source for it.
+        try:
+            for doc in yaml.safe_load_all(tmpl_res["stdout"]):
+                if isinstance(doc, dict) and doc.get("kind") == "Service":
+                    svc_name = doc.get("metadata", {}).get("name")
+                    ports = [p.get("port") for p in doc.get("spec", {}).get("ports", []) if p.get("port")]
+                    if svc_name and ports:
+                        detected_services.append({"name": svc_name, "ports": ports})
+        except yaml.YAMLError:
+            pass  # best-effort — a parse failure here doesn't invalidate the HelmRelease itself
     obj = {
         "apiVersion": "helm.toolkit.fluxcd.io/v2",
         "kind": "HelmRelease",
@@ -335,7 +351,7 @@ def _render_helm_release(name: str, params: RenderParams) -> tuple[Optional[str]
             "values": values,
         },
     }
-    return _yaml_dump(obj), None
+    return _yaml_dump(obj), None, ({"detected_services": detected_services} if detected_services else None)
 
 
 def _render_git_repository(name: str, params: RenderParams) -> tuple[Optional[str], Optional[dict]]:
@@ -505,16 +521,22 @@ def render_manifest(kind: str, name: str, params: RenderParams) -> str:
     При успехе — {"ok": true, "content_sha256": "...", "yaml": "..."}.
     content_sha256 передавай как validated_sha256 в forgejo_write_file для
     ЭТОГО ЖЕ yaml — тул откажет, если запишешь что-то другое.
+    Для kind=HelmRelease с заданным helm_repository_url — дополнительно
+    "detected_services": [{"name", "ports": [...]}], найденные в
+    отрендеренных чартом манифестах (kind=Service) — используй
+    detected_services[0] как service_name/service_port для последующего
+    render_manifest(kind=Ingress), не угадывай имя сервиса чарта.
     При ошибке — {"ok": false, "error_code": "...", ...} с закрытым
     error_code (render.missing_param / values.unknown_key /
     helm.template_error / helm.show_values_failed / values.yaml_unparseable),
     не свободным текстом — так группируются repair-попытки."""
     if kind not in VALID_KINDS:
         return _err("render.unknown_kind", f"kind must be one of {sorted(VALID_KINDS)}, got {kind!r}")
-    yaml_text, err = _RENDERERS[kind](name, params)
+    result = _RENDERERS[kind](name, params)
+    yaml_text, err, extra = result if len(result) == 3 else (*result, None)
     if err:
         return json.dumps({"ok": False, **err}, ensure_ascii=False)
-    return _ok_content(yaml_text)
+    return _ok_content(yaml_text, **(extra or {}))
 
 
 # --------------------------------------------------------------------------
