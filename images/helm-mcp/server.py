@@ -37,6 +37,7 @@ import subprocess
 import tempfile
 from typing import Optional
 
+import psycopg2
 import yaml
 from mcp.server.fastmcp import FastMCP
 from pydantic import BaseModel, Field
@@ -247,6 +248,46 @@ def check_values_keys(repo_url: str, chart: str, values_yaml: str, version: str 
 
 
 # --------------------------------------------------------------------------
+# repo_knowledge — exact-key facts about specific chart repos (access
+# restrictions, known-good alternates), NOT a fuzzy/semantic store — a
+# Postgres table fits better here than Qdrant's similarity search would,
+# since this is "do we know something about THIS exact URL", not "find
+# something similar". Manually curated for now (no auto-promotion from
+# escalations yet — deliberately deferred).
+# --------------------------------------------------------------------------
+
+
+@mcp.tool()
+def lookup_repo_knowledge(repo_url: str) -> str:
+    """Проверяет, есть ли известные факты про конкретный Helm-репозиторий
+    ДО того, как пытаться render_manifest/helm_show_values против него —
+    например репозиторий может требовать платной подписки для доступа
+    (как classic-индекс Bitnami, который отдаёт 403 без подписки) и иметь
+    известную рабочую альтернативу. Вызывай ЭТИМ URL'ом (тем, что дал
+    пользователь/Extract), не пытайся угадать канонический вид.
+    Возвращает {"ok": true, "found": bool, "note": str|null,
+    "alternative_repo_url": str|null} — found:false просто значит "ничего
+    не известно", не ошибка. Если alternative_repo_url задан — используй
+    ЕГО вместо исходного repo_url в последующих вызовах."""
+    database_uri = os.environ.get("DATABASE_URI")
+    if not database_uri:
+        return json.dumps({"ok": False, "error_code": "repo_knowledge.no_db_configured", "message": "DATABASE_URI not set"})
+    try:
+        conn = psycopg2.connect(database_uri, connect_timeout=5)
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT note, alternative_repo_url FROM repo_knowledge WHERE repo_url = %s", (repo_url,))
+                row = cur.fetchone()
+        finally:
+            conn.close()
+    except psycopg2.Error as e:
+        return json.dumps({"ok": False, "error_code": "repo_knowledge.db_error", "message": str(e)})
+    if not row:
+        return json.dumps({"ok": True, "found": False, "note": None, "alternative_repo_url": None})
+    return json.dumps({"ok": True, "found": True, "note": row[0], "alternative_repo_url": row[1]})
+
+
+# --------------------------------------------------------------------------
 # render_manifest — единая точка детерминированного рендера
 # --------------------------------------------------------------------------
 
@@ -303,7 +344,14 @@ def _render_helm_repository(name: str, params: RenderParams) -> tuple[Optional[s
 
 
 def _render_helm_release(name: str, params: RenderParams) -> tuple[Optional[str], Optional[dict], Optional[dict]]:
-    missing = [f for f in ("chart", "chart_version", "helm_repository_name", "values_yaml") if not getattr(params, f)]
+    # chart_version deliberately NOT required — omitting it is a normal,
+    # common request ("deploy the latest") and Flux's HelmRelease CRD
+    # already treats a missing spec.chart.spec.version as "any/latest"
+    # (same as omitting --version to `helm install`). Previously required
+    # here, which meant every unversioned chart request failed with
+    # render.missing_param and escalated to Supervisor unnecessarily —
+    # found live via testing (bitnami/redis, no version given).
+    missing = [f for f in ("chart", "helm_repository_name", "values_yaml") if not getattr(params, f)]
     if missing:
         return None, {"error_code": "render.missing_param", "message": f"missing required params for kind=HelmRelease: {missing}"}, None
     try:
@@ -337,19 +385,19 @@ def _render_helm_release(name: str, params: RenderParams) -> tuple[Optional[str]
                         detected_services.append({"name": svc_name, "ports": ports})
         except yaml.YAMLError:
             pass  # best-effort — a parse failure here doesn't invalidate the HelmRelease itself
+    chart_spec = {
+        "chart": params.chart,
+        "sourceRef": {"kind": "HelmRepository", "name": params.helm_repository_name},
+    }
+    if params.chart_version:
+        chart_spec["version"] = str(params.chart_version)
     obj = {
         "apiVersion": "helm.toolkit.fluxcd.io/v2",
         "kind": "HelmRelease",
         "metadata": {"name": name},
         "spec": {
             "interval": "30m",
-            "chart": {
-                "spec": {
-                    "chart": params.chart,
-                    "version": str(params.chart_version),
-                    "sourceRef": {"kind": "HelmRepository", "name": params.helm_repository_name},
-                }
-            },
+            "chart": {"spec": chart_spec},
             "values": values,
         },
     }

@@ -27,6 +27,12 @@ spec:
       containers:
         - name: helm-mcp
           image: registry.${base_domain}/helm-mcp:latest
+          env:
+            - name: DATABASE_URI
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-mcp-credentials
+                  key: DATABASE_URI
           ports:
             - name: http
               containerPort: 8080

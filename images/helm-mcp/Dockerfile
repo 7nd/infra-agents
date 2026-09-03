@@ -25,8 +25,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certifi
 # mcp>=2 переименовал FastMCP -> MCPServer с другим API — пинуем v1 ветку
 # (тот же пин, что понадобился для k8s-diag-mcp). pyyaml — для
 # render_*/check_values_keys (детерминированная сборка YAML вместо
-# свободного текста, set-diff ключей values).
-RUN pip install --no-cache-dir "mcp[cli]<2" pyyaml
+# свободного текста, set-diff ключей values). psycopg2-binary — для
+# lookup_repo_knowledge (тот же Postgres agents, что и repair_policy/
+# escalations, переиспользует postgres-mcp-credentials).
+RUN pip install --no-cache-dir "mcp[cli]<2" pyyaml psycopg2-binary
 
 COPY server.py /app/server.py
 WORKDIR /app
