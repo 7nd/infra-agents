@@ -35,7 +35,11 @@ spec:
               containerPort: 6060
           env:
             - name: PENPOT_FLAGS
-              value: "disable-email-verification enable-registration disable-secure-session-cookies"
+              # disable-registration: публичная регистрация закрыта, аккаунты
+              # заводит только админ (manage.py create-profile). enable-prepl-server
+              # — нужен именно manage.py, чтобы говорить с backend напрямую
+              # (PREPL — внутренний протокол, не HTTP API).
+              value: "disable-email-verification disable-registration enable-prepl-server disable-secure-session-cookies"
             - name: PENPOT_PUBLIC_URI
               value: https://penpot.agents.${base_domain}
             - name: PENPOT_HTTP_SERVER_MAX_BODY_SIZE

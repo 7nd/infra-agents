@@ -30,7 +30,11 @@ spec:
               containerPort: 8080
           env:
             - name: PENPOT_FLAGS
-              value: "disable-email-verification enable-registration disable-secure-session-cookies"
+              # disable-registration: скрывает форму регистрации в UI — сам по
+              # себе backend-флаг ничего не рисует, frontend должен знать о нём
+              # отдельно. enable-prepl-server сюда не нужен — он только про
+              # manage.py, который говорит с backend'ом напрямую (см. backend-deployment.yaml).
+              value: "disable-email-verification disable-registration disable-secure-session-cookies"
             - name: PENPOT_PUBLIC_URI
               value: https://penpot.agents.${base_domain}
             - name: PENPOT_HTTP_SERVER_MAX_BODY_SIZE
