@@ -34,7 +34,8 @@ spec:
               # себе backend-флаг ничего не рисует, frontend должен знать о нём
               # отдельно. enable-prepl-server сюда не нужен — он только про
               # manage.py, который говорит с backend'ом напрямую (см. backend-deployment.yaml).
-              value: "disable-email-verification disable-registration disable-secure-session-cookies"
+              # enable-access-tokens — показывает Settings → Access Tokens в UI.
+              value: "disable-email-verification disable-registration enable-access-tokens disable-secure-session-cookies"
             - name: PENPOT_PUBLIC_URI
               value: https://penpot.agents.${base_domain}
             - name: PENPOT_HTTP_SERVER_MAX_BODY_SIZE
