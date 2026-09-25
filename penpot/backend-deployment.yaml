@@ -48,6 +48,14 @@ spec:
               value: "367001600"
             - name: PENPOT_TELEMETRY_ENABLED
               value: "false"
+            # Импорт больших .penpot-файлов (UI-киты вроде Dashboard UI Kit,
+            # тысячи shape'ов) падал java.lang.OutOfMemoryError: без явного
+            # -Xmx JVM по умолчанию берёт MaxRAMPercentage=25% от лимита
+            # контейнера (тут было 1Gi -> ~256Mi кучи, вживую поймано на
+            # реальном импорте). JDK_JAVA_OPTIONS подхватывается самим java-
+            # launcher'ом автоматически (JDK9+), без обёрточного скрипта.
+            - name: JDK_JAVA_OPTIONS
+              value: "-Xmx1536m"
             - name: PENPOT_OBJECTS_STORAGE_BACKEND
               value: fs
             - name: PENPOT_OBJECTS_STORAGE_FS_DIRECTORY
@@ -83,9 +91,9 @@ spec:
           resources:
             requests:
               cpu: 100m
-              memory: 256Mi
+              memory: 384Mi
             limits:
-              memory: 1Gi
+              memory: 2Gi
       volumes:
         - name: assets
           persistentVolumeClaim:
