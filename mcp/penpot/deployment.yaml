@@ -1,9 +1,18 @@
-# zcube/penpot-mcp-server (community, публикует готовый multi-arch образ на
-# GHCR — тот же резон выбора, что у ronmi/forgejo-mcp: встроенный HTTP-режим,
-# не нужен supergateway-обёртка, в отличие от GlitchTip MCP). Headless,
-# REST API + Access Token — не официальный @penpot/mcp (тот требует открытый
-# Penpot в браузере с установленным плагином, не подходит для
-# автоматизации/ops-агента).
+# zcube/penpot-mcp-server (@zcubekr/penpot-mcp-server на npm) — community,
+# headless REST API + Access Token, встроенный HTTP-режим (не нужна
+# supergateway-обёртка, в отличие от GlitchTip MCP). Не официальный
+# @penpot/mcp — тот требует открытый Penpot в браузере с установленным
+# плагином, не подходит для автоматизации/ops-агента.
+#
+# ghcr.io/zcube/penpot-mcp-server НЕ существует (проверено: 403 на anon
+# token, страница пакета 404) — судя по всему, автор задокументировал
+# образ, который так и не запушил. Готового Docker-образа под этот пакет
+# нет нигде, поэтому вместо кастомной сборки (как images/glitchtip-mcp) —
+# стоковый node:20-alpine, ставит пакет из npm прямо при старте пода.
+# Дороже холодного старта (npm install при каждом рестарте), но не требует
+# docker build/push (локально Docker недоступен) — если станет заметной
+# проблемой, перейти на images/penpot-mcp/Dockerfile по образцу
+# images/glitchtip-mcp.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -23,7 +32,11 @@ spec:
         node-group: agents
       containers:
         - name: penpot-mcp
-          image: ghcr.io/zcube/penpot-mcp-server:latest
+          image: node:20-alpine
+          command:
+            - sh
+            - -c
+            - npm install -g @zcubekr/penpot-mcp-server@1.0.0 && exec penpot-mcp-server
           env:
             - name: TRANSPORT
               value: http
